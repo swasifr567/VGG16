@@ -1,9 +1,9 @@
 streamlit
-numpy
 pandas
-matplotlib
-Pillow
-requests
+numpy
+opencv-python-headless
 tensorflow
+Pillow
 scikit-learn
-cv2
+matplotlib
+requests
