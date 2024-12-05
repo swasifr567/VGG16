@@ -1,15 +1,53 @@
 import streamlit as st
+import pandas as pd
+import requests
 import os
 import numpy as np
-from tensorflow.keras.preprocessing import image
-from tensorflow.keras.applications.vgg16 import VGG16, preprocess_input
+import cv2
 from sklearn.metrics.pairwise import cosine_similarity
+from tensorflow.keras.applications.vgg16 import VGG16, preprocess_input
+from tensorflow.keras.models import Model
+from tensorflow.keras.preprocessing import image
 from PIL import Image
+import matplotlib.pyplot as plt
 
-# Initialize VGG16 model
-model = VGG16(weights='imagenet', include_top=False)
+# Initialize Streamlit app
+st.title("Image Similarity Finder")
+st.write("Upload an image to find similar images from the dataset.")
 
-# Function to extract features from an image
+# Load VGG16 model pre-trained on ImageNet
+@st.cache_resource
+def load_vgg16_model():
+    vgg16 = VGG16(weights='imagenet', include_top=False, input_shape=(224, 224, 3))
+    return Model(inputs=vgg16.input, outputs=vgg16.output)
+
+model = load_vgg16_model()
+
+# Function to download images from Google Sheets link
+@st.cache_data
+def download_images():
+    sheet_url = "https://docs.google.com/spreadsheets/d/121aV7BjJqCRlFcVegbbhI1Zmt67wG61ayRiFtDnafKY/export?format=csv&gid=0"
+    df = pd.read_csv(sheet_url)
+    os.makedirs('Images', exist_ok=True)
+
+    for _, row in df.iterrows():
+        product_id = row['Product ID']
+        image_url = row['image_link']
+        image_path = f'Images/{product_id}.jpg'
+        if not os.path.isfile(image_path):
+            try:
+                response = requests.get(image_url, stream=True)
+                if response.status_code == 200:
+                    with open(image_path, 'wb') as f:
+                        for chunk in response.iter_content(1024):
+                            f.write(chunk)
+            except Exception as e:
+                print(f"Error downloading {product_id}: {e}")
+
+download_images()
+
+# Extract features for all images
+@st.cache_data
 def extract_features(img_path):
     img = image.load_img(img_path, target_size=(224, 224))
     img_array = image.img_to_array(img)
@@ -18,67 +56,38 @@ def extract_features(img_path):
     features = model.predict(img_array)
     return features.flatten()
 
-# Function to get all features from images in a directory
+@st.cache_data
 def get_all_features(image_dir):
     features_list = []
-    image_paths = []
-    
-    if not os.path.exists(image_dir):
-        st.error(f"Directory not found: {image_dir}")
-        return [], []
-    
-    for img_name in os.listdir(image_dir):
+    image_paths = sorted(os.listdir(image_dir))
+    for img_name in image_paths:
         img_path = os.path.join(image_dir, img_name)
-        if img_name.lower().endswith(('.jpg', '.jpeg', '.png')):
-            features = extract_features(img_path)
-            features_list.append(features)
-            image_paths.append(img_path)
+        features = extract_features(img_path)
+        features_list.append(features)
     return features_list, image_paths
+
+features_list, image_paths = get_all_features('Images')
 
 # Function to find similar images
 def get_similar_images(query_img_path, features_list, image_paths, top_n=5):
     query_features = extract_features(query_img_path)
     similarities = [cosine_similarity(query_features.reshape(1, -1), feat.reshape(1, -1))[0][0] for feat in features_list]
     top_indices = np.argsort(similarities)[::-1][:top_n]
-    return [image_paths[i] for i in top_indices]
+    similar_images = [os.path.join('Images', image_paths[i]) for i in top_indices]
+    return similar_images
 
-# Streamlit Interface
-st.title("Image Similarity Finder using VGG16")
-st.write("Upload an image to find similar images.")
-
-# Ensure path to images is correct (adjust if needed)
-image_dir = os.path.abspath("/content/Images")  # Modify path if necessary
-st.write(f"Looking for images in: {image_dir}")
-
-# Check if the directory exists
-if os.path.exists(image_dir):
-    st.success(f"Directory found: {image_dir}")
-else:
-    st.error(f"Directory not found: {image_dir}")
-
-# Upload query image
+# Upload and display query image
 uploaded_file = st.file_uploader("Choose an image", type=["jpg", "png", "jpeg"])
-
 if uploaded_file:
-    # Display the uploaded image
+    with open("temp_query_image.jpg", "wb") as f:
+        f.write(uploaded_file.getbuffer())
     st.image(uploaded_file, caption="Uploaded Image", use_column_width=True)
 
-    # Save the uploaded file temporarily
-    temp_path = "temp_query_image.jpg"
-    with open(temp_path, "wb") as f:
-        f.write(uploaded_file.getbuffer())
+    # Get similar images
+    similar_images = get_similar_images("temp_query_image.jpg", features_list, image_paths)
 
-    # Load features and image paths
-    features_list, image_paths = get_all_features(image_dir)
-
-    if features_list:
-        # Find similar images
-        similar_images = get_similar_images(temp_path, features_list, image_paths)
-
-        # Display similar images
-        st.write("Top similar images:")
-        for img_path in similar_images:
-            img = Image.open(img_path)
-            st.image(img, caption=img_path, use_column_width=True)
-    else:
-        st.warning("No images found or features could not be extracted.")
+    # Display the similar images
+    st.write("Top similar images:")
+    for img_path in similar_images:
+        img = Image.open(img_path)
+        st.image(img, caption=os.path.basename(img_path), use_column_width=True)
