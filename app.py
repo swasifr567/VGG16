@@ -1,100 +1,88 @@
 import streamlit as st
-import pandas as pd
-import requests
-import os
 import numpy as np
-import matplotlib.pyplot as plt
-from PIL import Image
+import tensorflow as tf
 from tensorflow.keras.applications.vgg16 import VGG16, preprocess_input
-from tensorflow.keras.models import Model
-from tensorflow.keras.preprocessing import image
+from tensorflow.keras.preprocessing.image import img_to_array, load_img
 from sklearn.metrics.pairwise import cosine_similarity
+from PIL import Image
+import os
 
-# Initialize Streamlit app
-st.title("Image Similarity Finder")
-st.write("Upload an image to find similar images from the dataset.")
+# Load the VGG16 model without the top classification layer
+@st.cache_resource
+def load_model():
+    return VGG16(weights='imagenet', include_top=False)
 
-# Create the directory to store images
-image_dir = "Images"
-os.makedirs(image_dir, exist_ok=True)
-
-# Load the dataset from Google Sheets
-sheet_url = "https://docs.google.com/spreadsheets/d/121aV7BjJqCRlFcVegbbhI1Zmt67wG61ayRiFtDnafKY/export?format=csv&gid=0"
-df = pd.read_csv(sheet_url)
-
-# Download images if not already downloaded
-if st.button("Download Images"):
-    st.write("Downloading images...")
-    for index, row in df.iterrows():
-        product_id = row['Product ID']
-        image_url = row['image_link']
-        image_path = os.path.join(image_dir, f"{product_id}.jpg")
-
-        if not os.path.exists(image_path):
-            try:
-                response = requests.get(image_url, stream=True)
-                if response.status_code == 200:
-                    with open(image_path, 'wb') as f:
-                        for chunk in response.iter_content(1024):
-                            f.write(chunk)
-                    st.write(f"Downloaded: {product_id}.jpg")
-                else:
-                    st.write(f"Failed to download {product_id}.jpg: Status {response.status_code}")
-            except Exception as e:
-                st.write(f"Error downloading {product_id}.jpg: {e}")
-    st.write("Download complete!")
-
-# Load the VGG16 model pre-trained on ImageNet
-vgg16_model = VGG16(weights='imagenet', include_top=False, input_shape=(224, 224, 3))
-model = Model(inputs=vgg16_model.input, outputs=vgg16_model.output)
-
-# Feature extraction function
-def extract_features(img_path):
-    img = image.load_img(img_path, target_size=(224, 224))
-    img_array = image.img_to_array(img)
-    img_array = np.expand_dims(img_array, axis=0)
-    img_array = preprocess_input(img_array)
-    features = model.predict(img_array)
-    return features.flatten()
+model = load_model()
 
 # Extract features for all images in the dataset
-@st.cache
-def get_all_features(image_dir):
+@st.cache_data
+def load_features(image_dir):
     features_list = []
-    image_paths = os.listdir(image_dir)
-    for img_name in image_paths:
+    image_paths = []
+    
+    for img_name in os.listdir(image_dir):
         img_path = os.path.join(image_dir, img_name)
-        features = extract_features(img_path)
-        features_list.append(features)
+        image_paths.append(img_path)
+        
+        # Load and preprocess the image
+        img = load_img(img_path, target_size=(224, 224))
+        img_array = img_to_array(img)
+        img_array = np.expand_dims(img_array, axis=0)
+        img_array = preprocess_input(img_array)
+        
+        # Extract features using VGG16
+        features = model.predict(img_array)
+        features_list.append(features.flatten())
+        
     return features_list, image_paths
 
-if st.button("Extract Features"):
-    features_list, image_paths = get_all_features(image_dir)
-    st.write("Feature extraction complete!")
+# Function to find similar images
+def get_similar_images(query_image_path, features_list, image_paths, top_n=5):
+    # Load and preprocess the query image
+    query_img = load_img(query_image_path, target_size=(224, 224))
+    query_img_array = img_to_array(query_img)
+    query_img_array = np.expand_dims(query_img_array, axis=0)
+    query_img_array = preprocess_input(query_img_array)
+    
+    # Extract features from the query image
+    query_features = model.predict(query_img_array).flatten().reshape(1, -1)
+    
+    # Compute cosine similarity
+    similarities = cosine_similarity(query_features, features_list)
+    similar_indices = np.argsort(similarities[0])[::-1][:top_n]
+    
+    return [image_paths[i] for i in similar_indices]
 
-# Similarity calculation function
-def get_similar_images(query_img_path, features_list, image_paths, top_n=5):
-    query_features = extract_features(query_img_path)
-    similarities = [
-        cosine_similarity(query_features.reshape(1, -1), feat.reshape(1, -1))[0][0]
-        for feat in features_list
-    ]
-    top_indices = np.argsort(similarities)[::-1][:top_n]
-    return [os.path.join(image_dir, image_paths[i]) for i in top_indices]
+# Main Streamlit app
+def main():
+    st.title("Image Similarity Finder using VGG16")
+    
+    # Directory containing the dataset images
+    image_dir = "path/to/your/image/dataset"
+    
+    # Load the features and image paths
+    features_list, image_paths = load_features(image_dir)
+    
+    # Upload an image
+    uploaded_file = st.file_uploader("Upload an image", type=["jpg", "png", "jpeg"])
+    
+    if uploaded_file is not None:
+        query_image_path = f"temp_{uploaded_file.name}"
+        with open(query_image_path, "wb") as f:
+            f.write(uploaded_file.getbuffer())
+        
+        st.image(query_image_path, caption="Uploaded Image", use_container_width=True)
+        
+        if st.button("Find Similar Images"):
+            similar_images = get_similar_images(query_image_path, features_list, image_paths)
+            
+            st.write("Top similar images:")
+            for img_path in similar_images:
+                img = Image.open(img_path)
+                st.image(img, use_container_width=True)
+        
+        # Cleanup temporary file
+        os.remove(query_image_path)
 
-# Upload an image for querying
-uploaded_file = st.file_uploader("Upload an image", type=["jpg", "png", "jpeg"])
-
-if uploaded_file:
-    query_image_path = "query_image.jpg"
-    with open(query_image_path, "wb") as f:
-        f.write(uploaded_file.getbuffer())
-    st.image(uploaded_file, caption="Uploaded Image", use_column_width=True)
-
-    # Find and display similar images
-    if st.button("Find Similar Images"):
-        similar_images = get_similar_images(query_image_path, features_list, image_paths)
-        st.write("Top similar images:")
-        for img_path in similar_images:
-            img = Image.open(img_path)
-            st.image(img, caption=img_path, use_column_width=True)
+if __name__ == "__main__":
+    main()
