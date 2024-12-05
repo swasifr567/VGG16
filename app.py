@@ -21,11 +21,18 @@ def extract_features(img_path):
 # Function to get all features from images in a directory
 def get_all_features(image_dir):
     features_list = []
-    image_paths = os.listdir(image_dir)
-    for img_name in image_paths:
+    image_paths = []
+    
+    if not os.path.exists(image_dir):
+        st.error(f"Directory not found: {image_dir}")
+        return [], []
+    
+    for img_name in os.listdir(image_dir):
         img_path = os.path.join(image_dir, img_name)
-        features = extract_features(img_path)
-        features_list.append(features)
+        if img_name.lower().endswith(('.jpg', '.jpeg', '.png')):
+            features = extract_features(img_path)
+            features_list.append(features)
+            image_paths.append(img_path)
     return features_list, image_paths
 
 # Function to find similar images
@@ -33,12 +40,21 @@ def get_similar_images(query_img_path, features_list, image_paths, top_n=5):
     query_features = extract_features(query_img_path)
     similarities = [cosine_similarity(query_features.reshape(1, -1), feat.reshape(1, -1))[0][0] for feat in features_list]
     top_indices = np.argsort(similarities)[::-1][:top_n]
-    similar_images = [os.path.join('/content/Images', image_paths[i]) for i in top_indices]
-    return similar_images
+    return [image_paths[i] for i in top_indices]
 
 # Streamlit Interface
-st.title("Image Similarity Finder")
+st.title("Image Similarity Finder using VGG16")
 st.write("Upload an image to find similar images.")
+
+# Ensure path to images is correct (adjust if needed)
+image_dir = os.path.abspath("/content/Images")  # Modify path if necessary
+st.write(f"Looking for images in: {image_dir}")
+
+# Check if the directory exists
+if os.path.exists(image_dir):
+    st.success(f"Directory found: {image_dir}")
+else:
+    st.error(f"Directory not found: {image_dir}")
 
 # Upload query image
 uploaded_file = st.file_uploader("Choose an image", type=["jpg", "png", "jpeg"])
@@ -52,14 +68,17 @@ if uploaded_file:
     with open(temp_path, "wb") as f:
         f.write(uploaded_file.getbuffer())
 
-    # Load features and image paths (assuming data in '/content/Images')
-    features_list, image_paths = get_all_features('/content/Images')
+    # Load features and image paths
+    features_list, image_paths = get_all_features(image_dir)
 
-    # Find similar images
-    similar_images = get_similar_images(temp_path, features_list, image_paths)
+    if features_list:
+        # Find similar images
+        similar_images = get_similar_images(temp_path, features_list, image_paths)
 
-    # Display similar images
-    st.write("Top similar images:")
-    for img_path in similar_images:
-        img = Image.open(img_path)
-        st.image(img, caption=img_path, use_column_width=True)
+        # Display similar images
+        st.write("Top similar images:")
+        for img_path in similar_images:
+            img = Image.open(img_path)
+            st.image(img, caption=img_path, use_column_width=True)
+    else:
+        st.warning("No images found or features could not be extracted.")
