@@ -3,23 +3,21 @@ import requests
 import numpy as np
 import pandas as pd
 import pickle
-import matplotlib.pyplot as plt
+import streamlit as st
 from PIL import Image
 from tensorflow.keras.preprocessing import image
 from tensorflow.keras.applications import VGG16
 from tensorflow.keras.models import Model
 from tensorflow.keras.applications.vgg16 import preprocess_input
 from sklearn.metrics.pairwise import cosine_similarity
-import streamlit as st
 
-# Function to download images
-@st.cache_data  # This caches the function's results so it's not re-run on each refresh
+# Function to download images if they are not already downloaded
+@st.cache_data
 def download_images():
-    # Check if images are already downloaded
     if not os.path.exists('Images') or len(os.listdir('Images')) == 0:
         sheet_url = "https://raw.githubusercontent.com/swasifr567/VGG16/main/Data%20ID%20-%20Sheet1.csv"
         df = pd.read_csv(sheet_url)
-        
+
         os.makedirs("Images", exist_ok=True)
 
         for index, row in df.iterrows():
@@ -44,8 +42,8 @@ def download_images():
     else:
         print("Images already downloaded.")
 
-# Function to extract features from an image
-@st.cache_resource  # This caches the model, so it isn't reloaded on each refresh
+# Load the VGG16 model
+@st.cache_resource
 def load_model():
     vgg16_model = VGG16(weights='imagenet', include_top=False, input_shape=(224, 224, 3))
     model = Model(inputs=vgg16_model.input, outputs=vgg16_model.output)
@@ -62,76 +60,76 @@ def extract_features(img_path, model):
     return features
 
 # Function to extract features for all images
-@st.cache_data  # Caches the extracted features
+@st.cache_data
 def get_all_features(image_dir, model):
     features_list = []
     image_paths = os.listdir(image_dir)
+    for img_name in image_paths:
+        img_path = os.path.join(image_dir, img_name)
+        features = extract_features(img_path, model)
+        features_list.append(features)
 
-    # Check if features have been extracted already
-    if os.path.exists('features.pkl') and os.path.exists('image_paths.pkl'):
+    # Save features and image paths for future use
+    with open('features.pkl', 'wb') as f:
+        pickle.dump(features_list, f)
+    with open('image_paths.pkl', 'wb') as f:
+        pickle.dump(image_paths, f)
+
+    return features_list, image_paths
+
+# Function to get similar images
+def get_similar_images(query_img_path, features_list, image_paths, model, top_n=5):
+    query_features = extract_features(query_img_path, model)
+    similarities = []
+    for features in features_list:
+        similarity = cosine_similarity(query_features.reshape(1, -1), features.reshape(1, -1))
+        similarities.append(similarity[0][0])
+    top_indices = np.argsort(similarities)[-top_n:][::-1]
+    similar_images = [image_paths[i] for i in top_indices]
+    return similar_images
+
+# Streamlit UI for image input and display
+def display_similar_images(query_image, features_list, image_paths, model):
+    st.image(query_image, caption="Query Image", use_column_width=True)
+
+    # Get the top 5 similar images
+    similar_images = get_similar_images(query_image, features_list, image_paths, model)
+
+    # Display similar images
+    st.write("Top Similar Images:")
+
+    cols = st.columns(len(similar_images))  # Create columns for each similar image
+    for i, img_name in enumerate(similar_images):
+        img_path = os.path.join('Images', img_name)
+        img = Image.open(img_path)
+        cols[i].image(img, caption=f"Image {i+1}: {img_name}", use_column_width=True)
+
+# Main function for Streamlit app
+def main():
+    st.title("Similar Image Search")
+
+    # Step 1: Download images
+    download_images()
+
+    # Step 2: Load the VGG16 model
+    model = load_model()
+
+    # Step 3: Extract features if not already extracted
+    if not os.path.exists('features.pkl') or not os.path.exists('image_paths.pkl'):
+        features_list, image_paths = get_all_features('Images', model)
+    else:
         with open('features.pkl', 'rb') as f:
             features_list = pickle.load(f)
         with open('image_paths.pkl', 'rb') as f:
             image_paths = pickle.load(f)
-        print("Features already extracted, loading from saved files.")
-    else:
-        for img_name in image_paths:
-            img_path = os.path.join(image_dir, img_name)
-            features = extract_features(img_path, model)
-            features_list.append(features)
 
-        # Save features and image paths for future use
-        with open('features.pkl', 'wb') as f:
-            pickle.dump(features_list, f)
-        with open('image_paths.pkl', 'wb') as f:
-            pickle.dump(image_paths, f)
-        print("Features extracted and saved.")
+    # Step 4: User uploads query image
+    uploaded_image = st.file_uploader("Upload an image", type=["jpg", "jpeg", "png"])
 
-    return features_list, image_paths
-
-# Function to display images side by side using Streamlit
-def display_similar_images(image_paths):
-    # Loop through the images and display them in Streamlit
-    for img_path in image_paths:
-        img = Image.open(img_path)  # Open the image using PIL
-        st.image(img, use_column_width=True)  # Display image in Streamlit
-
-# Function to get similar images using cosine similarity
-def get_similar_images(query_img_path, features_list, image_paths, model, top_n=5):
-    query_features = extract_features(query_img_path, model)
-    similarities = []
-
-    for features in features_list:
-        similarity = cosine_similarity(query_features.reshape(1, -1), features.reshape(1, -1))
-        similarities.append(similarity[0][0])
-
-    top_indices = np.argsort(similarities)[::-1][:top_n]
-    similar_images = [os.path.join('Images', image_paths[i]) for i in top_indices]
-    return similar_images
-
-# Main function to run the app
-def main():
-    # Download images if not already present
-    download_images()
-
-    # Load the VGG16 model
-    model = load_model()
-
-    # Get the features from images
-    features_list, image_paths = get_all_features('Images', model)
-
-    # Allow the user to upload an image
-    uploaded_file = st.file_uploader("Choose an image...", type="jpg")
-    if uploaded_file is not None:
-        img_path = os.path.join('Images', uploaded_file.name)
-        with open(img_path, "wb") as f:
-            f.write(uploaded_file.getbuffer())
-
-        similar_images = get_similar_images(img_path, features_list, image_paths, model)
-        st.write("Top similar images:")
-        
-        # Display similar images side by side using Streamlit
-        display_similar_images(similar_images)
+    if uploaded_image is not None:
+        # Step 5: Display query image and similar images
+        query_image = Image.open(uploaded_image)
+        display_similar_images(uploaded_image, features_list, image_paths, model)
 
 if __name__ == "__main__":
     main()
