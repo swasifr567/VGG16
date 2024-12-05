@@ -26,23 +26,32 @@ model = load_vgg16_model()
 # Function to download images from Google Sheets link
 @st.cache_data
 def download_images():
-    sheet_url = "https://docs.google.com/spreadsheets/d/121aV7BjJqCRlFcVegbbhI1Zmt67wG61ayRiFtDnafKY/export?format=csv&gid=0"
+    # Use the raw URL for the CSV file on GitHub
+    sheet_url = "https://raw.githubusercontent.com/swasifr567/VGG16/main/Data%20ID%20-%20Sheet1.csv"
+    
+    # Load the dataset from the GitHub raw link
     df = pd.read_csv(sheet_url)
-    os.makedirs('Images', exist_ok=True)
-
-    for _, row in df.iterrows():
+    
+    # Create the directory to store images if it doesn't exist
+    os.makedirs("Images", exist_ok=True)
+    
+    # Download each image from the image_link in the dataset
+    for index, row in df.iterrows():
         product_id = row['Product ID']
         image_url = row['image_link']
-        image_path = f'Images/{product_id}.jpg'
-        if not os.path.isfile(image_path):
-            try:
-                response = requests.get(image_url, stream=True)
-                if response.status_code == 200:
-                    with open(image_path, 'wb') as f:
-                        for chunk in response.iter_content(1024):
-                            f.write(chunk)
-            except Exception as e:
-                print(f"Error downloading {product_id}: {e}")
+        image_path = os.path.join("Images", f"{product_id}.jpg")
+        
+        try:
+            response = requests.get(image_url, stream=True)
+            if response.status_code == 200:
+                with open(image_path, 'wb') as f:
+                    for chunk in response.iter_content(1024):
+                        f.write(chunk)
+                print(f"Downloaded: {product_id}.jpg")
+            else:
+                print(f"Failed to download {product_id}.jpg: Status {response.status_code}")
+        except Exception as e:
+            print(f"Error downloading {product_id}.jpg: {e}")
 
 download_images()
 
