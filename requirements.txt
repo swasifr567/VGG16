@@ -6,3 +6,4 @@ Pillow
 requests
 tensorflow
 scikit-learn
+cv2
