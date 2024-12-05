@@ -89,18 +89,12 @@ def get_all_features(image_dir, model):
 
     return features_list, image_paths
 
-# Function to display images side by side
+# Function to display images side by side using Streamlit
 def display_similar_images(image_paths):
-    plt.figure(figsize=(15, 10))  # Adjust figure size for layout
-
-    for idx, img_path in enumerate(image_paths):
+    # Loop through the images and display them in Streamlit
+    for img_path in image_paths:
         img = Image.open(img_path)  # Open the image using PIL
-        plt.subplot(1, len(image_paths), idx + 1)  # Create a subplot for each image
-        plt.imshow(img)
-        plt.axis('off')  # Turn off axes for cleaner visualization
-        plt.title(f"Image {idx + 1}")
-
-    plt.show()  # Display the plot
+        st.image(img, use_column_width=True)  # Display image in Streamlit
 
 # Function to get similar images using cosine similarity
 def get_similar_images(query_img_path, features_list, image_paths, model, top_n=5):
@@ -136,7 +130,7 @@ def main():
         similar_images = get_similar_images(img_path, features_list, image_paths, model)
         st.write("Top similar images:")
         
-        # Display similar images side by side
+        # Display similar images side by side using Streamlit
         display_similar_images(similar_images)
 
 if __name__ == "__main__":
