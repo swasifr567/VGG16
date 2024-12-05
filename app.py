@@ -13,6 +13,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 import streamlit as st
 
 # Function to download images
+@st.cache_data  # This caches the function's results so it's not re-run on each refresh
 def download_images():
     # Check if images are already downloaded
     if not os.path.exists('Images') or len(os.listdir('Images')) == 0:
@@ -44,6 +45,13 @@ def download_images():
         print("Images already downloaded.")
 
 # Function to extract features from an image
+@st.cache_resource  # This caches the model, so it isn't reloaded on each refresh
+def load_model():
+    vgg16_model = VGG16(weights='imagenet', include_top=False, input_shape=(224, 224, 3))
+    model = Model(inputs=vgg16_model.input, outputs=vgg16_model.output)
+    return model
+
+# Function to extract features from an image
 def extract_features(img_path, model):
     img = image.load_img(img_path, target_size=(224, 224))  # resize image to 224x224
     img_array = image.img_to_array(img)  # Convert image to array
@@ -54,6 +62,7 @@ def extract_features(img_path, model):
     return features
 
 # Function to extract features for all images
+@st.cache_data  # Caches the extracted features
 def get_all_features(image_dir, model):
     features_list = []
     image_paths = os.listdir(image_dir)
@@ -112,8 +121,7 @@ def main():
     download_images()
 
     # Load the VGG16 model
-    vgg16_model = VGG16(weights='imagenet', include_top=False, input_shape=(224, 224, 3))
-    model = Model(inputs=vgg16_model.input, outputs=vgg16_model.output)
+    model = load_model()
 
     # Get the features from images
     features_list, image_paths = get_all_features('Images', model)
